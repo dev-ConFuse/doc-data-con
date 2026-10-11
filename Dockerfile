@@ -45,10 +45,9 @@ RUN useradd --create-home app
 # Copy application code with strict ownership
 COPY --chown=app:app app/ ./app/
 
-# Environment variables
+# Environment variables (PORT is supplied at runtime via .map.env / .secret.env)
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
-ENV PORT=8081
 ENV PYTHONPATH=/app
 
 # Ensure correct permissions for the working directory
@@ -61,9 +60,9 @@ EXPOSE 8081
 
 # Health check optimized for Render
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8081}/health || exit 1
+    CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Use dumb-init as PID 1 for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
 
-CMD sh -c "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8081}"
+CMD sh -c "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"

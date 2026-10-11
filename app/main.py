@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     # This prevents Render free tier spin-down
     async def keepalive_doc_uni_proc():
         import httpx
-        processor_url = os.getenv("DOC_UNI_PROC_URL", "http://doc-uni-proc:8090")
+        processor_url = get_settings().doc_uni_proc_url
         
         while True:
             await asyncio.sleep(240)  # 4 minutes

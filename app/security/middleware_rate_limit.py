@@ -44,7 +44,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if skip_rate_limiting is not None:
             self.skip = skip_rate_limiting
         else:
-            self.skip = os.getenv("SKIP_RATE_LIMITING", "false").lower() == "true"
+            self.skip = os.environ["SKIP_RATE_LIMITING"].lower() == "true"
         # key -> list of timestamps
         self._counters: dict[str, list[float]] = defaultdict(list)
 
