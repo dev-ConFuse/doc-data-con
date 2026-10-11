@@ -25,7 +25,7 @@ class HttpDocumentProcessor:
 
     async def ensure_service_ready(self, max_wait_seconds: int = 60) -> bool:
         """
-        Wait for downstream doc-uni-proc to wake up (Render cold start) and be responsive.
+        Wait for downstream doc-uni-proc to become responsive.
         """
         endpoint = f"{self.base_url.rstrip('/')}/health"
         start_time = time.time()
@@ -82,7 +82,7 @@ class HttpDocumentProcessor:
                 if response.status_code >= 500:
                     if attempt < self.retry_attempts - 1:
                         wait_time = min(2 ** attempt, 8)
-                        logger.warning(f"Server error {response.status_code} (Render cold start?), retrying attempt {attempt + 1}/{self.retry_attempts} in {wait_time}s", filename=filename)
+                        logger.warning(f"Server error {response.status_code}, retrying attempt {attempt + 1}/{self.retry_attempts} in {wait_time}s", filename=filename)
                         await asyncio.sleep(wait_time)
                         continue
                         
