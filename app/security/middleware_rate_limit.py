@@ -24,23 +24,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
         app,
-        default_limit: int = 100,
-        search_limit: Optional[int] = None,
-        sources_limit: Optional[int] = None,
-        sync_limit: Optional[int] = None,
-        window_secs: int = 60,
         skip_rate_limiting: Optional[bool] = None,
     ):
         super().__init__(app)
-        self.default_limit = int(os.getenv("RATE_LIMIT_DEFAULT", str(default_limit)))
-        self.search_limit = int(
-            os.getenv("RATE_LIMIT_SEARCH", str(search_limit or default_limit // 2))
-        )
-        self.sources_limit = int(
-            os.getenv("RATE_LIMIT_SOURCES", str(sources_limit or default_limit))
-        )
-        self.sync_limit = int(os.getenv("RATE_LIMIT_SYNC", str(sync_limit or default_limit // 5)))
-        self.window_secs = window_secs
+        # Tuning values are env-only (see .cline/rules/env-policy.md)
+        self.default_limit = int(os.environ["RATE_LIMIT_DEFAULT"])
+        self.search_limit = int(os.environ["RATE_LIMIT_SEARCH"])
+        self.sources_limit = int(os.environ["RATE_LIMIT_SOURCES"])
+        self.sync_limit = int(os.environ["RATE_LIMIT_SYNC"])
+        self.window_secs = int(os.environ["RATE_LIMIT_WINDOW_SECS"])
         if skip_rate_limiting is not None:
             self.skip = skip_rate_limiting
         else:

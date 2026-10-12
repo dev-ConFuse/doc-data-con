@@ -110,14 +110,7 @@ def create_app() -> FastAPI:
     try:
         from app.security.middleware_rate_limit import RateLimitMiddleware
 
-        app.add_middleware(
-            RateLimitMiddleware,
-            default_limit=120,
-            search_limit=60,
-            sources_limit=30,
-            sync_limit=10,
-            skip_rate_limiting=True,
-        )
+        app.add_middleware(RateLimitMiddleware)
     except ImportError:
         logger.warning("confuse_common not installed, skipping RateLimitMiddleware")
 
