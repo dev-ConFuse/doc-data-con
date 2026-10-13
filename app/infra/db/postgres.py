@@ -78,10 +78,14 @@ async def _connect_with_retry(database_url: str):
 
     logger.info("Connecting to PostgreSQL", url=database_url)
 
-    # Configure async engine — only use SSL for cloud (Neon) PostgreSQL
+    # Configure async engine — only use SSL for cloud (Neon) PostgreSQL.
+    # asyncpg rejects libpq-style query params (sslmode / channel_binding), so
+    # strip the query string and translate TLS via connect_args instead.
     connect_args = {}
     if "neon.tech" in database_url or "sslmode=" in database_url:
         connect_args["ssl"] = "require"
+    if "?" in database_url:
+        database_url = database_url.split("?")[0]
 
     _engine = create_async_engine(
         database_url,
