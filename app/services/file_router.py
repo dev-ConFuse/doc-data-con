@@ -1,6 +1,8 @@
 """
-Data Connector Service - File Router
-Intelligently routes files to appropriate processing services.
+File Router — maps source files to the right processing pipeline.
+
+Files are classified by extension into code (→ repo-uni-proc) and document
+(→ doc-uni-proc) streams so each gets domain-appropriate processing.
 """
 
 import os

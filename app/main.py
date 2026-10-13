@@ -23,7 +23,7 @@ from app.infra.db.postgres import (
     close_postgresql,
     health_check as postgres_health_check,
 )
-from app.routing.routes import router as api_router
+from app.routing.core_routes import router as api_router
 from app.routing.documents_routes import router as documents_router
 
 # from app.routing.databases_routes import router as databases_router
