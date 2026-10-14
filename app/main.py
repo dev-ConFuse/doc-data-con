@@ -90,9 +90,14 @@ def create_app() -> FastAPI:
     # Add error handling middleware
     app.add_middleware(ErrorHandlingMiddleware)
 
-    # Add correlation ID middleware
-    from app.utils.logger import CorrelationIdMiddleware, configure_logging
-    configure_logging(json_logs=True) # Enable JSON logs in prod
+    # Correlation IDs + per-request access logs (outcome classification)
+    from app.utils.logger import (
+        AccessLogMiddleware,
+        CorrelationIdMiddleware,
+        configure_logging,
+    )
+    configure_logging(level=settings.log_level, log_format=settings.log_format)
+    app.add_middleware(AccessLogMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
 
     # Setup error handlers

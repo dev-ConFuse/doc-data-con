@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     host: str = Field(alias="HOST")
     debug: bool = Field(alias="DEBUG")
 
+    # Observability (uniform logging contract — see app/utils/logger.py)
+    log_level: str = Field(alias="LOG_LEVEL")
+    log_format: str = Field(alias="LOG_FORMAT")
+
     # PostgreSQL configuration (for sources and jobs management)
     database_url: str = Field(
         alias="DATABASE_URL", description="PostgreSQL connection URL for sources and jobs"
