@@ -47,8 +47,8 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         structlog.contextvars.clear_contextvars()
         structlog.contextvars.bind_contextvars(
             correlation_id=correlation_id,
-            http_method=request.method,
-            http_path=request.url.path,
+            method=request.method,
+            path=request.url.path,
         )
 
         response = await call_next(request)
@@ -159,6 +159,15 @@ def configure_logging(level: str, log_format: str) -> None:
         stream=sys.stdout,
         level=level_value,
     )
+    # uvicorn's access log is a second, unredacted access record (it logs the raw
+    # query string) — AccessLogMiddleware emits the contract record instead.
+    # A drop filter (not `disabled`): uvicorn's dictConfig runs after app import
+    # and resets logger flags, but it never removes filters.
+    class _DropAccessLogFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return False
+
+    logging.getLogger("uvicorn.access").addFilter(_DropAccessLogFilter())
 
 def get_logger(name=None):
     return structlog.get_logger(name)
