@@ -22,7 +22,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --retries 10 --timeout 60 .
 
 # Stage 2: Runtime
 FROM python:3.12-slim AS runtime
