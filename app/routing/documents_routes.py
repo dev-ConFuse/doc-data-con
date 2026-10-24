@@ -3,6 +3,7 @@ Document Management Routes for Data Connector Service
 Handles document CRUD operations, file uploads, and analytics
 """
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -232,78 +233,159 @@ async def upload_documents(
 
     user_id = parse_user_id(user_id_str)
     settings = get_settings()
+    downloads_base = Path(settings.downloads_folder)
+
+    # Read every file up front so the upload can be identified by content before
+    # anything is created. One document per (user, filename): identical bytes are
+    # ignored entirely, changed bytes update the existing row in place.
+    uploads: list[dict] = []
+    total_size = 0
+    for file in files:
+        file_content = await file.read()
+        uploads.append(
+            {
+                "name": file.filename or "unnamed",
+                "content": file_content,
+                "content_type": file.content_type,
+            }
+        )
+        total_size += len(file_content)
+
+    if not uploads:
+        raise HTTPException(status_code=400, detail="No files were provided.")
+
+    doc_name = (
+        source_name
+        if source_name != "local-upload"
+        else (uploads[0]["name"] if uploads else "uploaded-files")
+    )
+    doc_type = uploads[0]["name"].split(".")[-1] if "." in uploads[0]["name"] else "txt"
+
+    # Deterministic fingerprint over the request's files. Order-independent, so
+    # re-uploading the same set always produces the same hash.
+    digest = hashlib.sha256()
+    for item in sorted(uploads, key=lambda u: u["name"]):
+        digest.update(item["name"].encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(hashlib.sha256(item["content"]).digest())
+    content_hash = digest.hexdigest()
+
+    target_dir: Optional[Path] = None
     doc_id = uuid.uuid4()
 
-    downloads_base = Path(settings.downloads_folder)
-    target_dir = downloads_base / "docs" / str(doc_id)
-
-    logger.info(
-        "Processing document upload",
-        file_count=len(files),
-        source_name=source_name,
-        doc_id=str(doc_id),
-        target_dir=str(target_dir),
-    )
-
     try:
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        total_size = 0
-        uploaded_files_info = []
-
-        for file in files:
-            file_content = await file.read()
-            file_size = len(file_content)
-            total_size += file_size
-
-            file_path = target_dir / file.filename
-
-            if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
-                logger.warning("Potential path traversal attempt blocked", filename=file.filename)
-                continue
-
-            with open(file_path, "wb") as f:
-                f.write(file_content)
-
-            uploaded_files_info.append(
-                {"name": file.filename, "size_bytes": file_size, "content_type": file.content_type}
-            )
-
-        doc_name = (
-            source_name
-            if source_name != "local-upload"
-            else (files[0].filename if files else "uploaded-files")
-        )
-        doc_type = files[0].filename.split(".")[-1] if files and "." in files[0].filename else "txt"
-
-        # Create Document record in PostgreSQL
         async with get_session() as session:
-            new_doc = Document(
-                id=doc_id,
-                user_id=user_id,
-                name=doc_name,
-                doc_type=doc_type,
-                source="upload",
-                uri=f"local://docs/{doc_id}",
-                size=f"{total_size / 1024:.1f} KB" if total_size < 1024 * 1024 else f"{total_size / (1024 * 1024):.1f} MB",
-                size_bytes=total_size,
-                tags=[],
-                status="active",
-                document_metadata={
-                    "files": uploaded_files_info,
-                    "total_size_bytes": total_size,
-                    "file_count": len(uploaded_files_info),
-                    "upload_time": datetime.now(timezone.utc).isoformat(),
-                },
-            )
+            # Match on (user, source, name) so a document never appears twice.
+            existing_doc = (
+                await session.execute(
+                    select(Document)
+                    .where(
+                        Document.user_id == user_id,
+                        Document.source == "upload",
+                        Document.name == doc_name,
+                    )
+                    .order_by(Document.created_at.asc())
+                )
+            ).scalars().first()
 
-            session.add(new_doc)
+            if existing_doc is not None:
+                stored_hash = (existing_doc.document_metadata or {}).get("content_hash")
+                if stored_hash == content_hash:
+                    logger.info(
+                        "[UPLOAD] Identical content already stored - reusing existing document",
+                        doc_id=str(existing_doc.id),
+                        name=doc_name,
+                    )
+                    return {
+                        "success": True,
+                        "message": "Document already uploaded - no changes made",
+                        "data": {
+                            "id": str(existing_doc.id),
+                            "source_id": str(existing_doc.id),
+                            "duplicate": True,
+                            "files_processed": 0,
+                            "files_received": len(uploads),
+                            "total_size_bytes": total_size,
+                        },
+                    }
+                # Same name, different content: keep the row, re-index it.
+                doc_id = existing_doc.id
+                logger.info(
+                    "[UPLOAD] Content changed - updating existing document in place",
+                    doc_id=str(doc_id),
+                    name=doc_name,
+                )
+            else:
+                doc_id = uuid.uuid4()
+                logger.info("[UPLOAD] New document", doc_id=str(doc_id), name=doc_name)
+
+            target_dir = downloads_base / "docs" / str(doc_id)
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            uploaded_files_info = []
+            for item in uploads:
+                file_path = target_dir / item["name"]
+
+                if not str(file_path.resolve()).startswith(str(target_dir.resolve())):
+                    logger.warning("Potential path traversal attempt blocked", filename=item["name"])
+                    continue
+
+                with open(file_path, "wb") as f:
+                    f.write(item["content"])
+
+                uploaded_files_info.append(
+                    {"name": item["name"], "size_bytes": len(item["content"]), "content_type": item["content_type"]}
+                )
+
+            size_str = (
+                f"{total_size / 1024:.1f} KB"
+                if total_size < 1024 * 1024
+                else f"{total_size / (1024 * 1024):.1f} MB"
+            )
+            doc_metadata = {
+                "files": uploaded_files_info,
+                "content_hash": content_hash,
+                "total_size_bytes": total_size,
+                "file_count": len(uploaded_files_info),
+                "upload_time": datetime.now(timezone.utc).isoformat(),
+            }
+
+            if existing_doc is not None:
+                # Update in place - same row and same id, so nothing is listed twice.
+                existing_doc.doc_type = doc_type
+                existing_doc.uri = f"local://docs/{doc_id}"
+                existing_doc.size = size_str
+                existing_doc.size_bytes = total_size
+                existing_doc.status = "active"
+                existing_doc.document_metadata = doc_metadata
+                existing_doc.updated_at = datetime.now(timezone.utc)
+                session.add(existing_doc)
+                is_new = False
+            else:
+                session.add(
+                    Document(
+                        id=doc_id,
+                        user_id=user_id,
+                        name=doc_name,
+                        doc_type=doc_type,
+                        source="upload",
+                        uri=f"local://docs/{doc_id}",
+                        size=size_str,
+                        size_bytes=total_size,
+                        tags=[],
+                        status="active",
+                        document_metadata=doc_metadata,
+                    )
+                )
+                is_new = True
+
             await session.commit()
 
-            # Update billing count
+        # Billing counts documents, so only a genuinely new row moves the number.
+        if is_new:
             try:
                 import httpx
-                settings = get_settings()
+
                 async with httpx.AsyncClient() as http_client:
                     await http_client.post(
                         f"{settings.auth_url}/billing/internal/update-doc-count",
@@ -315,16 +397,20 @@ async def upload_documents(
                 logger.warning("[DOC-CREATE] Failed to update billing count", error=str(e))
 
         # Trigger background processing
-        background_tasks.add_task(
-            trigger_initial_sync, str(doc_id), "upload", new_doc.document_metadata
-        )
+        background_tasks.add_task(trigger_initial_sync, str(doc_id), "upload", doc_metadata)
 
         return {
             "success": True,
-            "message": f"Successfully uploaded {len(uploaded_files_info)} file(s) and triggered processing",
+            "message": (
+                f"Updated '{doc_name}' and re-triggered processing"
+                if not is_new
+                else f"Successfully uploaded {len(uploaded_files_info)} file(s) and triggered processing"
+            ),
             "data": {
                 "id": str(doc_id),
                 "source_id": str(doc_id),
+                "duplicate": False,
+                "updated_existing": not is_new,
                 "files_processed": len(uploaded_files_info),
                 "files_received": len(files),
                 "total_size_bytes": total_size,
@@ -333,7 +419,7 @@ async def upload_documents(
 
     except Exception as e:
         logger.error("Failed to process document upload", error=str(e), exc_info=True)
-        if target_dir.exists():
+        if target_dir is not None and target_dir.exists():
             import shutil
             try:
                 shutil.rmtree(target_dir)
