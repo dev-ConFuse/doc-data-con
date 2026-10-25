@@ -84,6 +84,17 @@ async def _connect_with_retry(database_url: str):
     connect_args = {}
     if "neon.tech" in database_url or "sslmode=" in database_url:
         connect_args["ssl"] = "require"
+    # Neon's -pooler endpoint is PgBouncer in *transaction* pooling mode, which
+    # cannot preserve asyncpg prepared statements across pooled backends. asyncpg
+    # caches statements by default and then dies with
+    # "connection was closed in the middle of operation" when the cached
+    # statement is replayed against a different backend. Disabling the cache is
+    # the documented fix for pooled Postgres.
+    connect_args["statement_cache_size"] = 0
+    # Neon free-tier computes suspend after a few idle minutes, so a cold
+    # connect can take 40s+ while it scales back up. asyncpg's default auth
+    # timeout is shorter than that and fails with "Authentication timed out".
+    connect_args["timeout"] = 120
     if "?" in database_url:
         database_url = database_url.split("?")[0]
 
@@ -92,7 +103,9 @@ async def _connect_with_retry(database_url: str):
         pool_size=10,
         max_overflow=20,
         pool_timeout=30,
-        pool_recycle=1800,
+        # Neon suspends idle computes and PgBouncer drops idle server connections
+        # well before SQLAlchemy's default recycle window.
+        pool_recycle=300,
         pool_pre_ping=True,
         echo=False,
         connect_args=connect_args,
