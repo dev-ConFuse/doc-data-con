@@ -90,10 +90,10 @@ graph TD
 **Prerequisites**: Proto stubs must be generated before running:
 ```bash
 # Windows
-./proto/generate_stubs.ps1
+python proto/generate_stubs.py
 
 # Linux/Mac
-./proto/generate_stubs.sh
+python proto/generate_stubs.py
 ```
 
 ### 6. Data Flow

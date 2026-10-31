@@ -26,8 +26,8 @@ cp .map.env.example .map.env
 cp .secret.env.example .secret.env
 
 # Generate gRPC stubs
-./proto/generate_stubs.sh  # Linux/Mac
-# or ./proto/generate_stubs.ps1  # Windows
+python proto/generate_stubs.py
+
 
 # Start the service
 uvicorn app.main:app --host 0.0.0.0 --port 3030
